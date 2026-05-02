@@ -1,6 +1,6 @@
 """
 QUANT LAB — Factor Model & Time Series Analysis
-A high-tech interactive dashboard implementing the FDA1 Project 2 spec:
+A high-tech interactive dashboard for empirical decomposition of stock returns:
 CAPM, Fama-French 3-factor, rolling beta, ADF, ACF/PACF, residual diagnostics.
 """
 
@@ -338,15 +338,36 @@ def fetch_ff_factors(start: date, end: date) -> pd.DataFrame:
     return ff
 
 
+@st.cache_data(show_spinner=False, ttl=60 * 60)
+def fetch_prices_pair(t1: str, t2: str, start: date, end: date) -> pd.DataFrame:
+    """Download both tickers in a single yfinance call (faster than two sequential)."""
+    df = yf.download(
+        [t1, t2],
+        start=start,
+        end=end + pd.Timedelta(days=1),
+        progress=False,
+        auto_adjust=True,
+        threads=True,
+        group_by="ticker",
+    )
+    if df is None or df.empty:
+        return pd.DataFrame()
+    out = pd.DataFrame()
+    for tk in (t1, t2):
+        try:
+            out[tk] = df[tk]["Close"]
+        except KeyError:
+            pass
+    out.index = pd.to_datetime(out.index).tz_localize(None)
+    return out.dropna()
+
+
 def assemble_dataset(t1: str, t2: str, start: date, end: date) -> pd.DataFrame:
     """Inner-join prices + factors, produce returns and excess returns."""
-    p1 = fetch_prices(t1, start, end)
-    p2 = fetch_prices(t2, start, end)
-    if p1.empty or p2.empty:
+    prices = fetch_prices_pair(t1, t2, start, end)
+    if prices.empty or t1 not in prices.columns or t2 not in prices.columns:
         raise RuntimeError("Failed to download price data for one or both tickers.")
     ff = fetch_ff_factors(start, end)
-
-    prices = p1.join(p2, how="inner")
     rets = prices.pct_change().rename(columns={t1: f"{t1}_ret", t2: f"{t2}_ret"})
     df = rets.join(ff, how="inner").dropna()
     df[f"{t1}_ex"] = df[f"{t1}_ret"] - df["RF"]
@@ -471,7 +492,7 @@ def line_chart(series_dict: dict[str, pd.Series], title: str, ylab: str, colors=
     fig = go.Figure()
     for i, (name, s) in enumerate(series_dict.items()):
         fig.add_trace(
-            go.Scatter(
+            go.Scattergl(
                 x=s.index,
                 y=s.values,
                 mode="lines",
@@ -541,7 +562,7 @@ def residual_diagnostic_panel(resid: pd.Series, label: str, color: str):
     )
     # Time plot
     fig.add_trace(
-        go.Scatter(x=resid.index, y=resid.values, mode="lines", line=dict(color=color, width=1.0), name="resid"),
+        go.Scattergl(x=resid.index, y=resid.values, mode="lines", line=dict(color=color, width=1.0), name="resid"),
         row=1, col=1,
     )
     fig.add_hline(y=0, line=dict(color="rgba(255,255,255,0.4)"), row=1, col=1)
@@ -561,7 +582,7 @@ def residual_diagnostic_panel(resid: pd.Series, label: str, color: str):
     theoretical = stats.norm.ppf((np.arange(1, n + 1) - 0.5) / n)
     slope, intercept, _, _, _ = stats.linregress(theoretical, res_sorted)
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=theoretical, y=res_sorted, mode="markers",
             marker=dict(color=color, size=3.5, opacity=0.7), name="qq",
         ),
@@ -593,7 +614,8 @@ def validate_tickers(t1: str, t2: str, info1: dict, info2: dict, df: pd.DataFram
     if t1.upper() == t2.upper():
         issues.append("Two tickers must be different.")
     if t1.upper() in EXCLUDED or t2.upper() in EXCLUDED:
-        issues.append(f"Excluded ticker(s) used. Forbidden list: {sorted(EXCLUDED)}")
+        bad = [x for x in (t1.upper(), t2.upper()) if x in EXCLUDED]
+        issues.append(f"Ticker not allowed: {', '.join(bad)}. Please choose a different stock.")
 
     for tk, info in [(t1, info1), (t2, info2)]:
         country = (info.get("country") or "").lower()
@@ -648,7 +670,6 @@ with st.sidebar:
     st.markdown("---")
     st.markdown(
         f"<div style='font-family:JetBrains Mono;font-size:10px;color:{PALETTE['muted']};line-height:1.6'>"
-        f"EXCLUDED · {' · '.join(sorted(EXCLUDED))}<br>"
         f"FACTORS · Mkt-RF · SMB · HML · RF<br>"
         f"SOURCE · yfinance × Ken French"
         f"</div>",
@@ -664,11 +685,11 @@ with st.sidebar:
 st.markdown(
     """
 <div class="qlab-hero">
-    <div class="subtitle">FDA1 · Project 2 · Factor Model & Time Series</div>
+    <div class="subtitle">Factor Model · Time Series · Residual Diagnostics</div>
     <h1>Two-Stock Factor Studio</h1>
     <div style="color:#8FA0BF;margin-top:6px;font-size:14px">
         Empirical decomposition of stock returns via CAPM, Fama-French 3-factor,
-        rolling beta, and residual diagnostics — built for the FDA1 spec.
+        rolling beta, and residual diagnostics.
     </div>
 </div>
 """,
@@ -861,10 +882,10 @@ with tabs[0]:
 
     section_header("02", "Rolling 252-day CAPM Beta")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=rb1.index, y=rb1.values, mode="lines",
-                             line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
-    fig.add_trace(go.Scatter(x=rb2.index, y=rb2.values, mode="lines",
-                             line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
+    fig.add_trace(go.Scattergl(x=rb1.index, y=rb1.values, mode="lines",
+                               line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
+    fig.add_trace(go.Scattergl(x=rb2.index, y=rb2.values, mode="lines",
+                               line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
     fig.add_hline(y=1.0, line=dict(color="rgba(255,255,255,0.4)", dash="dash"))
     fig.add_annotation(x=rb1.dropna().index[0], y=1.0, text="β = 1 (market)",
                        showarrow=False, font=dict(color=PALETTE["muted"], size=10),
@@ -992,9 +1013,9 @@ with tabs[2]:
     for c, (tk, ex, res, color) in zip([cA, cB], [(t1, ex1, capm1, PALETTE["cyan"]), (t2, ex2, capm2, PALETTE["magenta"])]):
         with c:
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=mkt, y=ex, mode="markers",
-                                     marker=dict(size=3.5, color=color, opacity=0.45),
-                                     name=tk, showlegend=False))
+            fig.add_trace(go.Scattergl(x=mkt, y=ex, mode="markers",
+                                       marker=dict(size=3.5, color=color, opacity=0.45),
+                                       name=tk, showlegend=False))
             xs = np.linspace(mkt.min(), mkt.max(), 50)
             ys = res.alpha + res.coefs["Mkt-RF"] * xs
             fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines",
@@ -1102,10 +1123,10 @@ with tabs[3]:
 with tabs[4]:
     section_header("3.4.1", "Rolling 252-day CAPM Beta")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=rb1.index, y=rb1.values, mode="lines",
-                             line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
-    fig.add_trace(go.Scatter(x=rb2.index, y=rb2.values, mode="lines",
-                             line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
+    fig.add_trace(go.Scattergl(x=rb1.index, y=rb1.values, mode="lines",
+                               line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
+    fig.add_trace(go.Scattergl(x=rb2.index, y=rb2.values, mode="lines",
+                               line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
     fig.add_hline(y=1.0, line=dict(color="rgba(255,255,255,0.4)", dash="dash"))
     fig.update_yaxes(title_text="rolling β")
     st.plotly_chart(style_fig(fig, height=420, title="rolling 252-day CAPM beta"), use_container_width=True)
@@ -1256,7 +1277,7 @@ with tabs[6]:
 st.markdown(
     f"""<div style="text-align:center;margin-top:30px;padding:20px;color:{PALETTE['muted']};
         font-family:JetBrains Mono;font-size:11px;letter-spacing:0.18em">
-        QUANT LAB · BUILT FOR FDA1 PROJECT 2 · {df.index[0].date()} → {df.index[-1].date()} · {len(df)} OBS
+        QUANT LAB · {df.index[0].date()} → {df.index[-1].date()} · {len(df)} OBS
     </div>""",
     unsafe_allow_html=True,
 )
