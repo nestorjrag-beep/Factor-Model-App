@@ -491,8 +491,9 @@ def line_chart(series_dict: dict[str, pd.Series], title: str, ylab: str, colors=
     colors = colors or [PALETTE["cyan"], PALETTE["magenta"], PALETTE["violet"]]
     fig = go.Figure()
     for i, (name, s) in enumerate(series_dict.items()):
+        s = s.dropna()
         fig.add_trace(
-            go.Scattergl(
+            go.Scatter(
                 x=s.index,
                 y=s.values,
                 mode="lines",
@@ -562,7 +563,7 @@ def residual_diagnostic_panel(resid: pd.Series, label: str, color: str):
     )
     # Time plot
     fig.add_trace(
-        go.Scattergl(x=resid.index, y=resid.values, mode="lines", line=dict(color=color, width=1.0), name="resid"),
+        go.Scatter(x=resid.index, y=resid.values, mode="lines", line=dict(color=color, width=1.0), name="resid"),
         row=1, col=1,
     )
     fig.add_hline(y=0, line=dict(color="rgba(255,255,255,0.4)"), row=1, col=1)
@@ -882,10 +883,12 @@ with tabs[0]:
 
     section_header("02", "Rolling 252-day CAPM Beta")
     fig = go.Figure()
-    fig.add_trace(go.Scattergl(x=rb1.index, y=rb1.values, mode="lines",
-                               line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
-    fig.add_trace(go.Scattergl(x=rb2.index, y=rb2.values, mode="lines",
-                               line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
+    rb1c = rb1.dropna()
+    rb2c = rb2.dropna()
+    fig.add_trace(go.Scatter(x=rb1c.index, y=rb1c.values, mode="lines",
+                             line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
+    fig.add_trace(go.Scatter(x=rb2c.index, y=rb2c.values, mode="lines",
+                             line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
     fig.add_hline(y=1.0, line=dict(color="rgba(255,255,255,0.4)", dash="dash"))
     fig.add_annotation(x=rb1.dropna().index[0], y=1.0, text="β = 1 (market)",
                        showarrow=False, font=dict(color=PALETTE["muted"], size=10),
@@ -1123,10 +1126,12 @@ with tabs[3]:
 with tabs[4]:
     section_header("3.4.1", "Rolling 252-day CAPM Beta")
     fig = go.Figure()
-    fig.add_trace(go.Scattergl(x=rb1.index, y=rb1.values, mode="lines",
-                               line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
-    fig.add_trace(go.Scattergl(x=rb2.index, y=rb2.values, mode="lines",
-                               line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
+    rb1c = rb1.dropna()
+    rb2c = rb2.dropna()
+    fig.add_trace(go.Scatter(x=rb1c.index, y=rb1c.values, mode="lines",
+                             line=dict(color=PALETTE["cyan"], width=1.8), name=t1))
+    fig.add_trace(go.Scatter(x=rb2c.index, y=rb2c.values, mode="lines",
+                             line=dict(color=PALETTE["magenta"], width=1.8), name=t2))
     fig.add_hline(y=1.0, line=dict(color="rgba(255,255,255,0.4)", dash="dash"))
     fig.update_yaxes(title_text="rolling β")
     st.plotly_chart(style_fig(fig, height=420, title="rolling 252-day CAPM beta"), use_container_width=True)
