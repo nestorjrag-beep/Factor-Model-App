@@ -279,20 +279,61 @@ def fetch_ticker_info(ticker: str) -> dict:
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
 def fetch_ff_factors(start: date, end: date) -> pd.DataFrame:
     """
-    Daily Fama-French 3 factors + RF from Ken French's data library.
-    Returns columns: Mkt-RF, SMB, HML, RF (already converted to DECIMAL units).
+    Daily Fama-French 3 factors + RF, fetched directly from Ken French's
+    data library (CSV in a ZIP). Returns columns: Mkt-RF, SMB, HML, RF
+    in DECIMAL units (the published values are in percent and divided by 100 here).
     """
-    from pandas_datareader import data as pdr
+    import urllib.request
+    import zipfile
 
-    ff = pdr.DataReader(
-        "F-F_Research_Data_Factors_daily",
-        "famafrench",
-        start=start,
-        end=end,
-    )[0]
+    url = (
+        "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/"
+        "ftp/F-F_Research_Data_Factors_daily_CSV.zip"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        raw = resp.read()
+    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+        csv_name = next(n for n in zf.namelist() if n.lower().endswith(".csv"))
+        text = zf.read(csv_name).decode("latin-1")
+
+    # The file has a multi-line header before the data block. Find first data row.
+    lines = text.splitlines()
+    header_idx = None
+    for i, ln in enumerate(lines):
+        parts = [p.strip() for p in ln.split(",")]
+        if parts and parts[0].lower().startswith("mkt"):
+            # Some versions: ",Mkt-RF,SMB,HML,RF"; locate the column header line
+            header_idx = i
+            break
+        if len(parts) >= 5 and "Mkt-RF" in parts:
+            header_idx = i
+            break
+    if header_idx is None:
+        # Fallback: first line whose first token is an 8-digit date
+        for i, ln in enumerate(lines):
+            tok = ln.split(",", 1)[0].strip()
+            if tok.isdigit() and len(tok) == 8:
+                header_idx = i - 1
+                break
+
+    data_lines = []
+    for ln in lines[header_idx + 1 :]:
+        first = ln.split(",", 1)[0].strip()
+        if not first.isdigit() or len(first) != 8:
+            # Stop at the first non-data line (e.g. annual block separator)
+            break
+        data_lines.append(ln)
+
+    ff = pd.read_csv(
+        io.StringIO("Date,Mkt-RF,SMB,HML,RF\n" + "\n".join(data_lines)),
+        parse_dates=["Date"],
+        date_format="%Y%m%d",
+    )
+    ff = ff.set_index("Date")
     ff.index = pd.to_datetime(ff.index).tz_localize(None)
-    ff = ff.rename(columns=lambda c: c.strip())
-    # Critical: FF is published in PERCENT — convert to decimal to match pct_change()
+    ff = ff.loc[(ff.index >= pd.Timestamp(start)) & (ff.index <= pd.Timestamp(end))]
+    # Convert PERCENT → DECIMAL to match pct_change() returns
     ff = ff / 100.0
     return ff
 
